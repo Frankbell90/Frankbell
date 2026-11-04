@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frankbell Portfolio | Admin</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#172033;background:#f2f5fa}*{box-sizing:border-box}body{margin:0;padding:24px}.wrap{max-width:900px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:22px}.card{background:white;border:1px solid #e0e6ef;border-radius:14px;padding:22px;margin:16px 0;box-shadow:0 8px 28px #15213a0a}h1,h2{margin:0 0 12px}p{color:#647084}label{display:block;font-weight:700;font-size:13px;margin:14px 0 6px}input,textarea,select{width:100%;padding:12px;border:1px solid #ccd5e2;border-radius:8px;font:inherit}textarea{min-height:85px}button,.btn{border:0;border-radius:8px;padding:11px 16px;background:#315eea;color:#fff;font-weight:700;cursor:pointer}button.secondary{background:#263449}button.danger{background:#c33d48}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.hidden{display:none!important}.status{padding:12px;background:#eef3ff;border-radius:8px;margin:12px 0;color:#243a70}.project{display:flex;gap:14px;align-items:center;border-top:1px solid #e7ebf1;padding:14px 0}.project img{width:90px;height:75px;object-fit:cover;border-radius:8px;background:#eee}.project .meta{flex:1;min-width:0}.project p{margin:4px 0;font-size:13px}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{padding:8px 10px;font-size:12px}@media(max-width:600px){body{padding:14px}.row{grid-template-columns:1fr}.project{align-items:flex-start}.project img{width:72px;height:72px}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body><main class="wrap">
+<div class="top"><div><h1>Portfolio Admin</h1><p>Upload and manage the work displayed on your public portfolio.</p></div><a href="/" class="btn" style="text-decoration:none">View website ↗</a></div>
+<div id="notice" class="status" role="status">Sign in with your administrator account.</div>
+<section id="login" class="card"><h2>Administrator login</h2><form id="loginForm"><label>Email</label><input id="email" type="email" autocomplete="username" required value="frankbelo048@gmail.com"><label>Password</label><input id="password" type="password" autocomplete="current-password" required><p><button type="submit">Sign in</button></p></form></section>
+<section id="dashboard" class="hidden">
+<div class="card"><div class="top"><h2>Add a design / project</h2><button id="logout" class="secondary">Sign out</button></div>
+<form id="projectForm"><label>Project title</label><input id="title" maxlength="100" required placeholder="e.g. Birthday flyer design">
+<label>Category</label><select id="category" required><option>Logo Design</option><option>Flyers and Posters</option><option>Business Cards</option><option>Birthday and Wedding Designs</option><option>Funeral Designs</option><option>Printing and Branding</option><option>Website Projects</option></select>
+<label>Description</label><textarea id="description" maxlength="500" placeholder="Briefly describe the work"></textarea>
+<label>Design image (JPG, PNG or WebP; max 10MB)</label><input id="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+<label style="display:flex;align-items:center;gap:9px"><input id="publish" type="checkbox" style="width:auto"> Publish immediately on my website</label>
+<p><button type="submit">Upload project</button></p></form></div>
+<div class="card"><h2>My uploaded projects</h2><div id="projects">Loading projects…</div></div>
+</section></main>
+<script>
+const SUPABASE_URL="https://klrewmngsybfaicobdng.supabase.co";
+const SUPABASE_KEY="sb_publishable_uyuNlo84yWaMQALVjySERg_O6vViYqR";
+const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=id=>document.getElementById(id);
+function say(message){$("notice").textContent=message}
+async function checkSession(){
+ const {data:{session}}=await db.auth.getSession();
+ if(!session){$("login").classList.remove("hidden");$("dashboard").classList.add("hidden");return}
+ const {data:admin,error}=await db.from("portfolio_admins").select("user_id").eq("user_id",session.user.id).maybeSingle();
+ if(error||!admin){await db.auth.signOut();$("login").classList.remove("hidden");$("dashboard").classList.add("hidden");say("This account is not authorized as a portfolio administrator.");return}
+ $("login").classList.add("hidden");$("dashboard").classList.remove("hidden");say("Signed in securely. Only published projects appear on the public website.");loadProjects();
+}
+$("loginForm").addEventListener("submit",async e=>{e.preventDefault();say("Signing in…");const {error}=await db.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});if(error){say(error.message);return}await checkSession()});
+$("logout").addEventListener("click",async()=>{await db.auth.signOut();await checkSession();say("You have signed out.")});
+$("projectForm").addEventListener("submit",async e=>{
+ e.preventDefault();const file=$("image").files[0];if(!file)return;
+ if(file.size>10*1024*1024){say("Image is larger than 10MB.");return}
+ if(!["image/jpeg","image/png","image/webp"].includes(file.type)){say("Please choose a JPG, PNG or WebP image.");return}
+ say("Uploading image and saving project…");
+ const ext=file.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g,"")||"jpg";
+ const path=crypto.randomUUID()+"-"+Date.now()+"."+ext;
+ const up=await db.storage.from("portfolio-designs").upload(path,file,{contentType:file.type,upsert:false});
+ if(up.error){say("Image upload failed: "+up.error.message);return}
+ const saved=await db.from("portfolio_projects").insert({title:$("title").value.trim(),category:$("category").value,description:$("description").value.trim(),image_path:path,is_published:$("publish").checked}).select().single();
+ if(saved.error){await db.storage.from("portfolio-designs").remove([path]);say("Could not save project: "+saved.error.message);return}
+ $("projectForm").reset();say("Project uploaded successfully.");loadProjects();
+});
+async function loadProjects(){
+ const {data,error}=await db.from("portfolio_projects").select("*").order("created_at",{ascending:false});
+ if(error){$("projects").textContent=error.message;return}
+ if(!data.length){$("projects").textContent="No projects uploaded yet.";return}
+ $("projects").innerHTML="";
+ for(const p of data){
+  const url=db.storage.from("portfolio-designs").getPublicUrl(p.image_path).data.publicUrl;
+  const el=document.createElement("article");el.className="project";
+  const img=document.createElement("img");img.src=url;img.alt=p.title;
+  const meta=document.createElement("div");meta.className="meta";
+  const title=document.createElement("strong");title.textContent=p.title;
+  const desc=document.createElement("p");desc.textContent=p.category+" · "+(p.is_published?"Published":"Hidden");
+  meta.append(title,desc);
+  const actions=document.createElement("div");actions.className="actions";
+  const toggle=document.createElement("button");toggle.className="secondary";toggle.textContent=p.is_published?"Hide":"Publish";toggle.onclick=()=>changePublish(p.id,!p.is_published);
+  const del=document.createElement("button");del.className="danger";del.textContent="Delete";del.onclick=()=>deleteProject(p);
+  actions.append(toggle,del);el.append(img,meta,actions);$("projects").append(el);
+ }
+}
+async function changePublish(id,value){const {error}=await db.from("portfolio_projects").update({is_published:value}).eq("id",id);say(error?error.message:"Project status updated.");loadProjects()}
+async function deleteProject(p){if(!confirm("Permanently delete this project?"))return;const {error}=await db.from("portfolio_projects").delete().eq("id",p.id);if(error){say(error.message);return}await db.storage.from("portfolio-designs").remove([p.image_path]);say("Project deleted.");loadProjects()}
+db.auth.onAuthStateChange(()=>{checkSession()});
+checkSession();
+</script></body></html>
